@@ -1,0 +1,78 @@
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+# Токен для бота
+API_TOKEN = '7345785606:AAHdnHxfpe3-8rH7VnRuEf9c_2fmTo3apRQ'
+
+bot = telebot.TeleBot(API_TOKEN)
+
+# Приветственное сообщение
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    markup = InlineKeyboardMarkup()
+    btn1 = InlineKeyboardButton(text='💳 Купить товар', callback_data='buy_product')
+    btn2 = InlineKeyboardButton(text='SOS', url='https://t.me/CV_IND')
+    btn3 = InlineKeyboardButton(text='🇱🇷🔁🇷🇺🔁🇨🇳', callback_data='change_language')
+    markup.add(btn1, btn2, btn3)
+    
+    bot.send_message(message.chat.id, f"Привет, {message.from_user.first_name}!\nПеред покупкой рекомендуем ознакомиться с правилами магазина.", reply_markup=markup)
+
+# Обработчик для кнопок
+@bot.callback_query_handler(func=lambda call: True)
+def callback_inline(call):
+    if call.data == 'buy_product':
+        send_categories(call.message)
+    elif call.data == 'change_language':
+        send_language_options(call.message)
+
+# Отправка категорий товаров
+def send_categories(message):
+    markup = InlineKeyboardMarkup()
+    btn1 = InlineKeyboardButton(text='🇪🇺 EU | CC 🇪🇺', callback_data='buy_eu_cc')
+    btn2 = InlineKeyboardButton(text='🇺🇸 USA | CC 🇺🇸', callback_data='buy_usa_cc')
+    btn3 = InlineKeyboardButton(text='🇯🇵 ASIA | CC 🇯🇵', callback_data='buy_asia_cc')
+    btn4 = InlineKeyboardButton(text='👁️‍🗨️ 3D-s Merchant', callback_data='buy_3ds_merchant')
+    markup.add(btn1, btn2, btn3, btn4)
+    
+    bot.send_message(message.chat.id, "Доступные на данный момент категории:", reply_markup=markup)
+
+# Отправка информации о товаре
+def send_product_info(message, product_name, price):
+    markup = InlineKeyboardMarkup()
+    btn = InlineKeyboardButton(text='Купить товар 🧾', url='http://t.me/send?start=IVAMyFRK2QeZ')
+    markup.add(btn)
+    
+    bot.send_message(message.chat.id, f"Текущая категория: {product_name}\nСтоимость: {price}\n\nВ комментарии к оплате обязательно укажите какой товар вы приобретаете. 🛑💡", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
+def callback_buy_product(call):
+    if call.data == 'buy_eu_cc':
+        send_product_info(call.message, '🇪🇺 EU | CC 🇪🇺', '$12')
+    elif call.data == 'buy_usa_cc':
+        send_product_info(call.message, '🇺🇸 USA | CC 🇺🇸', '$15')
+    elif call.data == 'buy_asia_cc':
+        send_product_info(call.message, '🇯🇵 ASIA | CC 🇯🇵', '$12')
+    elif call.data == 'buy_3ds_merchant':
+        send_product_info(call.message, '👁️‍🗨️ 3D-s Merchant', '$250')
+
+# Отправка вариантов смены языка
+def send_language_options(message):
+    markup = InlineKeyboardMarkup()
+    btn1 = InlineKeyboardButton(text='🇱🇷 English', callback_data='lang_en')
+    btn2 = InlineKeyboardButton(text='🇷🇺 Русский', callback_data='lang_ru')
+    btn3 = InlineKeyboardButton(text='🇨🇳 中文', callback_data='lang_cn')
+    markup.add(btn1, btn2, btn3)
+    
+    bot.send_message(message.chat.id, "Выберите язык:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lang_'))
+def callback_change_language(call):
+    if call.data == 'lang_en':
+        bot.send_message(call.message.chat.id, "Language changed to English.")
+    elif call.data == 'lang_ru':
+        bot.send_message(call.message.chat.id, "Язык изменён на русский.")
+    elif call.data == 'lang_cn':
+        bot.send_message(call.message.chat.id, "语言已更改为中文。")
+
+# Запуск бота
+bot.polling(none_stop=True)
