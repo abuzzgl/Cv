@@ -1,78 +1,185 @@
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Токен для бота
-API_TOKEN = '7345785606:AAHdnHxfpe3-8rH7VnRuEf9c_2fmTo3apRQ'
+# Настройка логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-bot = telebot.TeleBot(API_TOKEN)
+# Токен вашего бота
+TOKEN = '7461283027:AAEHvnCWCQywbatd4rLGa6TlLn0X8HIPTWA'
 
-# Приветственное сообщение
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    markup = InlineKeyboardMarkup()
-    btn1 = InlineKeyboardButton(text='💳 Купить товар', callback_data='buy_product')
-    btn2 = InlineKeyboardButton(text='SOS', url='https://t.me/CV_IND')
-    btn3 = InlineKeyboardButton(text='🇱🇷🔁🇷🇺🔁🇨🇳', callback_data='change_language')
-    markup.add(btn1, btn2, btn3)
+# Словарь для хранения языков пользователей
+user_languages = {}
+
+# Словари для хранения балансов и истории покупок
+user_balances = {}
+purchase_history = {}
+
+# Словарь с переводами текста на разные языки
+translations = {
+    'ru': {
+        'welcome_message': 'Добро пожаловать в наш магазин!',
+        'choose_category': 'Выберите категорию:',
+        'choose_cc_type': 'Выберите тип CC:',
+        'eu_cc_text': 'Стоимость: $12 за штуку\nТовар: 🇪🇺 EU | Карта 🇪🇺\n⚠️ **В комментарии к оплате обязательно укажите какой товар вы приобретаете.**',
+        'usa_cc_text': 'Стоимость: $15 за штуку\nТовар: 🇺🇸 USA | Карта 🇺🇸\n⚠️ **В комментарии к оплате обязательно укажите какой товар вы приобретаете.**',
+        'asia_cc_text': 'Стоимость: $12 за штуку\nТовар: 🇯🇵 ASIA | Карта 🇯🇵\n⚠️ **В комментарии к оплате обязательно укажите какой товар вы приобретаете.**',
+        '3ds_text': '💳 3D-s Merchant\n📍 Гео/Валюта: EUR, GBP, PLN, CZK, USD, AMD, AZN, BAM, BGN, CAD, CHF, DKK, GEL, HRK, HUF, ILS, INR, ISK, KGS, KZT, MDL, NOK, RON, RSD, SEK, TJS, TRY, UZS, VND, AED\n🔐 Верификация: KYC\nСтоимость: $250\n⚠️ **В комментарии к оплате обязательно укажите какой товар вы приобретаете.**',
+        'rules_text': '🎩 Правила нашего магазина, ознакомьтесь с ними перед покупкой чего-либо у нас.\n\n🚫 Поведение:\n1.1 Оскорбление администрации проекта - отказ вернуть товар\n1.2 Активное распространение заведомо ложной информации о проекте – отказ в возврате товара\n1.3 Попытка обмануть администрацию проекта - отказ в возврате товара\n\n📝 Условия:\n2.1 Передача карт третьим лицам – отказ в возврате товара\n2.2 После совершения покупки в магазине у вас есть 15 минут, чтобы открыть возврат (возврат осуществляется только на баланс аккаунта)\n2.3 Видеодоказательства необходимы с момента покупки до момента вождения.\n2.4 Неудачная попытка работы с материалом с вашей стороны мошенничество/возврат денег - отказ в возврате товара\n2.5 После оплаты товара вы должны написать в поддержку, какой именно товар вы приобрели, чтобы получить его.',
+        'profile_text': '👤 Профиль\nID: {user_id}\n💰 Баланс: ${balance}\n💳 Всего пополнено: ${total_added}\n🏆 Статус: {status}',
+        'language_changed': 'Язык изменен на русский!',
+        'statuses_text': '🏆 Доступные статусы:\n\n1. **Новичок** (0-5 покупок)\n2. **Любитель скидок** (6-10 покупок со скидкой)\n3. **Завсегдатай** (11-20 покупок)\n4. **Ценитель качества** (21-30 покупок без возвратов)\n5. **Элитный клиент** (31-50 покупок на сумму более $1000)\n6. **Легенда магазина** (51+ покупок, совершил покупку в первый день работы бота)\n7. **Почетный член клуба** (100+ покупок, рекомендовал магазин 10+ друзьям)',
+        'add_funds': 'Выберите сумму пополнения:',
+        'funds_added': 'Баланс пополнен на ${amount}',
+        'purchase_history': 'Ваша история покупок:',
+        'no_purchases': 'У вас пока нет покупок.'
+    },
+    'en': {
+        'welcome_message': 'Welcome to our store!',
+        'choose_category': 'Select a category:',
+        'choose_cc_type': 'Select a CC type:',
+        'eu_cc_text': 'Price: $12 per item\nProduct: 🇪🇺 EU | Card 🇪🇺\n⚠️ **Please specify the product you are purchasing in the payment comment.**',
+        'usa_cc_text': 'Price: $15 per item\nProduct: 🇺🇸 USA | Card 🇺🇸\n⚠️ **Please specify the product you are purchasing in the payment comment.**',
+        'asia_cc_text': 'Price: $12 per item\nProduct: 🇯🇵 ASIA | Card 🇯🇵\n⚠️ **Please specify the product you are purchasing in the payment comment.**',
+        '3ds_text': '💳 3D-s Merchant\n📍 Geo/Currency: EUR, GBP, PLN, CZK, USD, AMD, AZN, BAM, BGN, CAD, CHF, DKK, GEL, HRK, HUF, ILS, INR, ISK, KGS, KZT, MDL, NOK, RON, RSD, SEK, TJS, TRY, UZS, VND, AED\n🔐 Verification: KYC\nPrice: $250\n⚠️ **Please specify the product you are purchasing in the payment comment.**',
+        'rules_text': '🎩 Rules of our store, please read them before purchasing anything from us.\n\n🚫 Behavior:\n1.1 Insulting the project administration - refusal to return the product\n1.2 Active dissemination of deliberately false information about the project - refusal to return the product\n1.3 Attempt to deceive the project administration - refusal to return the product\n\n📝 Conditions:\n2.1 Transfer of cards to third parties - refusal to return the product\n2.2 After making a purchase in the store, you have 15 minutes to open a return (returns are made only to the account balance)\n2.3 Video evidence is necessary from the moment of purchase to the moment of driving.\n2.4 Unsuccessful attempt to work with the material on your part fraud/refund - refusal to return the product\n2.5 After paying for the product, you must write to support which product you purchased in order to receive it.',
+        'profile_text': '👤 Profile\nID: {user_id}\n💰 Balance: ${balance}\n💳 Total added: ${total_added}\n🏆 Status: {status}',
+        'language_changed': 'Language changed to English!',
+        'statuses_text': '🏆 Available statuses:\n\n1. **Newbie** (0-5 purchases)\n2. **Discount Lover** (6-10 purchases with discount)\n3. **Regular** (11-20 purchases)\n4. **Quality Connoisseur** (21-30 purchases without returns)\n5. **Elite Client** (31-50 purchases totaling more than $1000)\n6. **Store Legend** (51+ purchases, made a purchase on the first day of the bot\'s operation)\n7. **Honorary Club Member** (100+ purchases, recommended the store to 10+ friends)',
+        'add_funds': 'Select amount to add:',
+        'funds_added': 'Added ${amount} to balance',
+        'purchase_history': 'Your purchase history:',
+        'no_purchases': 'You have no purchases yet.'
+    }
+}
+
+# Функция для создания клавиатуры главного меню
+def main_menu_keyboard(user_language):
+    keyboard = [
+        [InlineKeyboardButton("💳 Купить товар" if user_language == 'ru' else "💳 Buy product", callback_data='buy')],
+        [InlineKeyboardButton("🎩 Правила" if user_language == 'ru' else "🎩 Rules", callback_data='rules')],
+        [InlineKeyboardButton("🆘 Поддержка" if user_language == 'ru' else "🆘 Support", url='http://t.me/CV_SHOP_SUPPORT_BOT')],
+        [InlineKeyboardButton(f"🇷🇺 | 🇬🇧", callback_data='change_language')],
+        [InlineKeyboardButton("👤 Профиль" if user_language == 'ru' else "👤 Profile", callback_data='profile')],
+        [InlineKeyboardButton("🏆 Статусы" if user_language == 'ru' else "🏆 Statuses", callback_data='statuses')],
+        [InlineKeyboardButton("💰 Пополнить баланс" if user_language == 'ru' else "💰 Add funds", callback_data='add_funds')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# Обработчик команды /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    user_languages[user_id] = 'ru'  # Устанавливаем язык пользователя по умолчанию
+    user_balances[user_id] = 0  # Устанавливаем начальный баланс
+    purchase_history[user_id] = []  # Инициализируем историю покупок
+    await update.message.reply_text(translations['ru']['welcome_message'], reply_markup=main_menu_keyboard('ru'))
+
+# Обработчик нажатий на кнопки
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = update.effective_user.id
+    user_language = user_languages.get(user_id, 'ru')
+    await query.answer()
+
+    if query.data == 'buy':
+        categories_keyboard = [
+            [InlineKeyboardButton("💳 CC", callback_data='cc')],
+            [InlineKeyboardButton("👁️‍🗨️ 3D-s Merchant", callback_data='3ds')],
+            [InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]
+        ]
+        await query.edit_message_text(text=translations[user_language]['choose_category'], reply_markup=InlineKeyboardMarkup(categories_keyboard))
     
-    bot.send_message(message.chat.id, f"Привет, {message.from_user.first_name}!\nПеред покупкой рекомендуем ознакомиться с правилами магазина.", reply_markup=markup)
-
-# Обработчик для кнопок
-@bot.callback_query_handler(func=lambda call: True)
-def callback_inline(call):
-    if call.data == 'buy_product':
-        send_categories(call.message)
-    elif call.data == 'change_language':
-        send_language_options(call.message)
-
-# Отправка категорий товаров
-def send_categories(message):
-    markup = InlineKeyboardMarkup()
-    btn1 = InlineKeyboardButton(text='🇪🇺 EU | CC 🇪🇺', callback_data='buy_eu_cc')
-    btn2 = InlineKeyboardButton(text='🇺🇸 USA | CC 🇺🇸', callback_data='buy_usa_cc')
-    btn3 = InlineKeyboardButton(text='🇯🇵 ASIA | CC 🇯🇵', callback_data='buy_asia_cc')
-    btn4 = InlineKeyboardButton(text='👁️‍🗨️ 3D-s Merchant', callback_data='buy_3ds_merchant')
-    markup.add(btn1, btn2, btn3, btn4)
+    elif query.data == 'cc':
+        cc_keyboard = [
+            [InlineKeyboardButton("🇪🇺 EU | Карта 🇪🇺" if user_language == 'ru' else "🇪🇺 EU | Card 🇪🇺", callback_data='eu_cc'), InlineKeyboardButton("🇺🇸 USA | Карта 🇺🇸" if user_language == 'ru' else "🇺🇸 USA | Card 🇺🇸", callback_data='usa_cc')],
+            [InlineKeyboardButton("🇯🇵 ASIA | Карта 🇯🇵" if user_language == 'ru' else "🇯🇵 ASIA | Card 🇯🇵", callback_data='asia_cc')],
+            [InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_categories')]
+        ]
+        await query.edit_message_text(text=translations[user_language]['choose_cc_type'], reply_markup=InlineKeyboardMarkup(cc_keyboard))
     
-    bot.send_message(message.chat.id, "Доступные на данный момент категории:", reply_markup=markup)
-
-# Отправка информации о товаре
-def send_product_info(message, product_name, price):
-    markup = InlineKeyboardMarkup()
-    btn = InlineKeyboardButton(text='Купить товар 🧾', url='http://t.me/send?start=IVAMyFRK2QeZ')
-    markup.add(btn)
+    elif query.data in ['eu_cc', 'usa_cc', 'asia_cc']:
+        buy_keyboard = [[InlineKeyboardButton("Купить товар 🧾" if user_language == 'ru' else "Buy product 🧾", url='http://t.me/send?start=IVv9vLCqReZm')]]
+        await query.edit_message_text(
+            text=translations[user_language][f'{query.data}_text'],
+            reply_markup=InlineKeyboardMarkup(buy_keyboard),
+            parse_mode='Markdown'
+        )
     
-    bot.send_message(message.chat.id, f"Текущая категория: {product_name}\nСтоимость: {price}\n\nВ комментарии к оплате обязательно укажите какой товар вы приобретаете. 🛑💡", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
-def callback_buy_product(call):
-    if call.data == 'buy_eu_cc':
-        send_product_info(call.message, '🇪🇺 EU | CC 🇪🇺', '$12')
-    elif call.data == 'buy_usa_cc':
-        send_product_info(call.message, '🇺🇸 USA | CC 🇺🇸', '$15')
-    elif call.data == 'buy_asia_cc':
-        send_product_info(call.message, '🇯🇵 ASIA | CC 🇯🇵', '$12')
-    elif call.data == 'buy_3ds_merchant':
-        send_product_info(call.message, '👁️‍🗨️ 3D-s Merchant', '$250')
-
-# Отправка вариантов смены языка
-def send_language_options(message):
-    markup = InlineKeyboardMarkup()
-    btn1 = InlineKeyboardButton(text='🇱🇷 English', callback_data='lang_en')
-    btn2 = InlineKeyboardButton(text='🇷🇺 Русский', callback_data='lang_ru')
-    btn3 = InlineKeyboardButton(text='🇨🇳 中文', callback_data='lang_cn')
-    markup.add(btn1, btn2, btn3)
+    elif query.data == '3ds':
+        buy_keyboard = [[InlineKeyboardButton("Купить товар 🧾" if user_language == 'ru' else "Buy product 🧾", url='http://t.me/send?start=IVv9vLCqReZm')]]
+        await query.edit_message_text(
+            text=translations[user_language]['3ds_text'],
+            reply_markup=InlineKeyboardMarkup(buy_keyboard),
+            parse_mode='Markdown'
+        )
     
-    bot.send_message(message.chat.id, "Выберите язык:", reply_markup=markup)
+    elif query.data == 'rules':
+        rules_keyboard = [[InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]]
+        await query.edit_message_text(text=translations[user_language]['rules_text'], reply_markup=InlineKeyboardMarkup(rules_keyboard))
+    
+    elif query.data == 'profile':
+        profile_text = translations[user_language]['profile_text'].format(
+            user_id=update.effective_user.id,
+            balance=user_balances.get(user_id, 0),
+            total_added=user_balances.get(user_id, 0),
+            status='Новичок' if user_language == 'ru' else 'Beginner'
+        )
+        profile_keyboard = [
+            [InlineKeyboardButton("📋 История покупок" if user_language == 'ru' else "📋 Purchase history", callback_data='purchase_history')],
+            [InlineKeyboardButton(f"🇷🇺 | 🇬🇧", callback_data='change_language')],
+            [InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]
+        ]
+        await query.edit_message_text(text=profile_text, reply_markup=InlineKeyboardMarkup(profile_keyboard))
+    
+    elif query.data == 'statuses':
+        await query.edit_message_text(text=translations[user_language]['statuses_text'], parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]]))
+    
+    elif query.data == 'change_language':
+        user_languages[user_id] = 'en' if user_language == 'ru' else 'ru'
+        await query.edit_message_text(translations[user_languages[user_id]]['language_changed'], reply_markup=main_menu_keyboard(user_languages[user_id]))
+    
+    elif query.data == 'add_funds':
+        add_funds_keyboard = [
+            [InlineKeyboardButton("$10", callback_data='add_10')],
+            [InlineKeyboardButton("$50", callback_data='add_50')],
+            [InlineKeyboardButton("$100", callback_data='add_100')],
+            [InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]
+        ]
+        await query.edit_message_text(text=translations[user_language]['add_funds'], reply_markup=InlineKeyboardMarkup(add_funds_keyboard))
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('lang_'))
-def callback_change_language(call):
-    if call.data == 'lang_en':
-        bot.send_message(call.message.chat.id, "Language changed to English.")
-    elif call.data == 'lang_ru':
-        bot.send_message(call.message.chat.id, "Язык изменён на русский.")
-    elif call.data == 'lang_cn':
-        bot.send_message(call.message.chat.id, "语言已更改为中文。")
+    elif query.data.startswith('add_'):
+        amount = int(query.data.split('_')[1])
+        user_balances[user_id] = user_balances.get(user_id, 0) + amount
+        await query.answer(translations[user_language]['funds_added'].format(amount=amount))
+        await query.edit_message_text(text=translations[user_language]['welcome_message'], reply_markup=main_menu_keyboard(user_language))
 
-# Запуск бота
-bot.polling(none_stop=True)
+    elif query.data == 'purchase_history':
+        history = purchase_history.get(user_id, [])
+        if history:
+            history_text = translations[user_language]['purchase_history'] + '\n\n' + '\n'.join(history)
+        else:
+            history_text = translations[user_language]['no_purchases']
+        await query.edit_message_text(text=history_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='profile')]]))
+    
+    elif query.data in ['back_to_main', 'back_to_categories']:
+        if query.data == 'back_to_main':
+            await query.edit_message_text(text=translations[user_language]['welcome_message'], reply_markup=main_menu_keyboard(user_language))
+        else:
+            categories_keyboard = [
+                [InlineKeyboardButton("💳 CC", callback_data='cc')],
+                [InlineKeyboardButton("👁️‍🗨️ 3D-s Merchant", callback_data='3ds')],
+                [InlineKeyboardButton("🔙 Назад" if user_language == 'ru' else "🔙 Back", callback_data='back_to_main')]
+            ]
+            await query.edit_message_text(text=translations[user_language]['choose_category'], reply_markup=InlineKeyboardMarkup(categories_keyboard))
+
+def main() -> None:
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button))
+
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
